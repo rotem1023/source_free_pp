@@ -4,6 +4,9 @@ from torchvision import models
 import torch.nn as nn
 import torch.nn.utils.weight_norm as weightNorm
 
+from backpack import extend
+import copy
+
 
 def init_weights(m):
     classname = m.__class__.__name__
@@ -104,6 +107,29 @@ class FullModel(torch.nn.Module):
         embeddings = self.netB(features)
         outputs = self.netC(embeddings)
         return outputs
+    
+class SfppFeatureNetwork(torch.nn.Module):
+    def __init__(self, netF, netB):
+        super(SfppFeatureNetwork, self).__init__()
+        self.netF = netF
+        self.netB = netB
+
+    def forward(self, x):
+        features = self.netF(x)
+        embeddings = self.netB(features)
+        return embeddings
+
+    
+class SfppModel:
+    def __init__(self, model_name, dataset, src_domain, tgt_domain, year):
+        netF, netB, netC = load_model_parts(model_name=model_name, dataset=dataset, src_domain=src_domain,
+                                        tgt_domain=tgt_domain, year=year)
+        self.feature_extractor = SfppFeatureNetwork(netF=netF, netB=netB)
+        self.classifier = netC
+
+        # We extend the classifier layer of the model to use the backpack library for the gradient computation
+        self.classifier = extend(self.classifier)
+
 
 def _get_models_dir():
     current_file_path = os.path.dirname(os.path.abspath(__file__))
@@ -111,7 +137,7 @@ def _get_models_dir():
 
 
 
-def load_model(model_name, dataset, src_domain, tgt_domain, year):
+def load_model_parts(model_name, dataset, src_domain, tgt_domain, year):
     model_path = f"{_get_models_dir()}/{dataset}/{src_domain}{tgt_domain}/{year}/{model_name}.pth"
     dict_to_load = torch.load(model_path)
     
@@ -134,8 +160,16 @@ def load_model(model_name, dataset, src_domain, tgt_domain, year):
             netC.load_state_dict(dict_to_load[component], strict=False)
     
     netC.eval()
-    for k, v in netC.named_parameters():
-        v.requires_grad = False
-    
+    # netB.eval()
+    # netF.eval()
+    return netF, netB, netC
+
+
+def load_model(model_name, dataset, src_domain, tgt_domain, year):
+    netF, netB, netC = load_model_parts(model_name=model_name, dataset=dataset, src_domain=src_domain,
+                                        tgt_domain=tgt_domain, year=year)
+    # for k, v in netC.named_parameters():
+    #     v.requires_grad = False
     full_model = FullModel(netF, netB, netC)
     return full_model
+

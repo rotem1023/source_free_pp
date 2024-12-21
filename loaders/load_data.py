@@ -23,7 +23,7 @@ def data_load_from_dir(dataset_dir):
     train_iamges = f"{dataset_dir}/train_images.txt"
     train_labels = f"{dataset_dir}/train_labels.txt"
     validation_iamges = f"{dataset_dir}/validation_images.txt"
-    validation_labels = f"{dataset_dir}/train_labels.txt"
+    validation_labels = f"{dataset_dir}/validation_labels.txt"
     
     
     txt_tar = open(train_iamges).readlines()

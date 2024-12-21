@@ -35,7 +35,7 @@ def _cal_predictions(model, loader):
 
 def pseudo_target_synthesis (x , lam , pred_a ):
     # Random batch index .
-    rand_idx = torch . randperm ( x . shape [0])
+    rand_idx = torch.randperm ( x . shape [0])
     inputs_a = x
     inputs_b = x [ rand_idx ]
     # Obtain model predictions and pseudo labels (pl ).
@@ -53,18 +53,22 @@ def pseudo_target_synthesis (x , lam , pred_a ):
     return pseudo_inputs [ diff_idx ] , pseudo_labels [ diff_idx ]
 
 
-def calc_optimal_temp( pseudo_preds , pseudo_labels):
+def calc_optimal_temp( pseudo_preds , pseudo_labels, n_bins, adaECE):
     # Apply temperature scaling to estimate the
     # pseudo - target temperature as the real temperature .
-    calib_method = FindTemp ()
-    pseudo_temp = calib_method ( pseudo_preds , pseudo_labels )
+    calib_method = FindTemp (LOGIT=True, n_bins=n_bins, adaECE=adaECE)
+    pseudo_temp = calib_method.find_best_T( pseudo_preds , pseudo_labels )
     return pseudo_temp
 
-def run_pseudo_cal(model, loader, lam = 0.65):
+def run_pseudo_cal(model, loader, n_bins, adaECE,  lam = 0.65):
+    # move model to gpu
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+    
     x, logits, predictions, labels  = _cal_predictions(model = model, loader = loader)
 
     pseudo_x , pseudo_y = pseudo_target_synthesis(x, lam, predictions)
-    batch_size = 64  # Set your desired batch size
+    batch_size = 32
     dataset = TensorDataset(pseudo_x, torch.tensor(pseudo_y))
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
@@ -83,14 +87,20 @@ def run_pseudo_cal(model, loader, lam = 0.65):
     # Concatenate all predictions
     all_pseudo_pred = np.concatenate(all_pseudo_pred, axis=0)
     
-    T = calc_optimal_temp(pseudo_preds=all_pseudo_pred, pseudo_labels = pseudo_y)
+    T = calc_optimal_temp(pseudo_preds=torch.from_numpy(all_pseudo_pred), pseudo_labels = torch.from_numpy(pseudo_y), n_bins = n_bins, adaECE = adaECE)
     return T, logits, labels
 
-def run_pseudo_cal_with_loss(model, loader, n_bins, adaEce, lam = 0.65):
-    T , logits, labels = run_pseudo_cal(model = model, loader = loader, lam = lam)
+def run_pseudo_cal_with_loss(model, loader, n_bins, adaECE, lam = 0.65):
+    T , logits, labels = run_pseudo_cal(model = model, loader = loader, lam = lam, adaECE=adaECE, n_bins=n_bins)
+    calib_loss = CalibrationLoss(LOGIT=True, n_bins = n_bins, adaECE=adaECE)
+    loss = calib_loss.forward(logits=torch.from_numpy(logits)/T, labels = labels.cpu().detach())
+    return T, 100 * loss.item()
 
 
 
 if __name__ == "__main__":
-    train_loader, validation_loader = load_data(dataset="VISDA", domain="SR", year='2019')
-    model = load_model(dataset="VISDA", model_name="shot", src_domain='S', tgt_domain='R', year='2019')
+    year = '2019'
+    train_loader, validation_loader = load_data(dataset="VISDA", domain="SR", year=year)
+    model = load_model(dataset="VISDA", model_name="shot", src_domain='S', tgt_domain='R', year=year)
+    T, loss = run_pseudo_cal_with_loss(model=model, loader = validation_loader, n_bins = 15, adaECE = True)
+    print(f"optimal T: {T}, loss: {loss}")
